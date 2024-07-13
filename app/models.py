@@ -1,29 +1,42 @@
 from __future__ import annotations
-from typing import List
 
-from sqlalchemy import ForeignKey
-from sqlalchemy import Integer, ForeignKey, String
-from sqlalchemy.orm import Mapped
-from sqlalchemy.orm import mapped_column
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import relationship
 from typing import List, Optional
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, BooleanField, SubmitField
-from wtforms.validators import DataRequired
 
 import sqlalchemy as sa
-import sqlalchemy.orm as so
+from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import Mapped, mapped_column, relationship, registry
 
+from flask_login import UserMixin
 
-class Base(DeclarativeBase):
-    pass
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from app import db, login
+
+@login.user_loader
+def load_user(id):
+    return db.session.get(User, int(id))
+
+"""Databases for all of the user profiles including the staff members and the volunteers. """
+
+class User(UserMixin, db.Model):
+    id: Mapped[int] = mapped_column(sa.Integer(), primary_key=True)
+    username: Mapped[str] = mapped_column(sa.String(64), index=True, unique=True)
+    email: Mapped[str] = mapped_column(sa.String(120), index=True, unique=True)
+    password_hash: Mapped[str] = mapped_column(sa.String(128))
+
+    def __repr__(self):
+        return '<User {}>'.format(self.username)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 """Database for the hedgehogs including their name, age, and staff member. """
 
-class Hedgehogs(Base):
+class Hedgehogs(db.Model):
     __tablename__ = 'hedgehogs'
     id: Mapped[int] = mapped_column(sa.Integer(), primary_key=True)
     name: Mapped[str] = mapped_column(sa.String(), nullable= False)
@@ -33,28 +46,36 @@ class Hedgehogs(Base):
 
 """ Databases for the staff members including the volunteers and permanent staff. """
 
-class Staff():
+class Staff(db.Model):
     __tablename__ = 'staff'
-    id: Mapped[int] = mapped_column(sa.Integer(), primary_key= True)
-    name: Mapped[str] = mapped_column(sa.String(), nullable= False)
-    hedgehog_under_care: Mapped[int] = ForeignKey('hedgehogs.id')
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    hedgehog_under_care: Mapped[int] = mapped_column(ForeignKey('hedgehogs.id'))
+    staff_type: Mapped[str] = mapped_column(String(50), nullable=False)  # Add type column for polymorphic identity
 
-class VolunteerStaff():
-    
+    __mapper_args__ = {
+        'polymorphic_identity': 'staff',
+        'polymorphic_on': staff_type
+    }
+
+class VolunteerStaff(Staff):
     __tablename__ = 'volunteer_staff'
-    id: Mapped[int] = mapped_column(sa.Integer(), primary_key= True)
-    hours: Mapped[int] = mapped_column(sa.Integer(), nullable= False)
+    id: Mapped[int] = mapped_column(ForeignKey('staff.id'), primary_key=True)
+    hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    staffkey: Mapped[int] = mapped_column(ForeignKey('staff.id'), use_existing_column=True)
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'volunteer_staff',
+        'inherit_condition': (id == Staff.id)
+    }
 
 class PermanentStaff(Staff):
     __tablename__ = 'permanent_staff'
-    id: Mapped[int] = mapped_column(sa.Integer(), primary_key= True)
-    years_of_experience: Mapped[int] = mapped_column(sa.Integer(), nullable= False)
+    id: Mapped[int] = mapped_column(ForeignKey('staff.id'), primary_key=True)
+    years_of_experience: Mapped[int] = mapped_column(Integer, nullable=False)
+    staffkey: Mapped[int] = mapped_column(ForeignKey('staff.id'), use_existing_column=True)
 
-"""Databases for all things related to the login and registration of the users"""
-
-class LoginForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
-    remember_me = BooleanField('remember_me')
-    submit = SubmitField('Sign In')
-
+    __mapper_args__ = {
+        'polymorphic_identity': 'permanent_staff',
+        'inherit_condition': (id == Staff.id)
+    }
